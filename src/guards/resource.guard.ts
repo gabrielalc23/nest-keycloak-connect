@@ -64,8 +64,8 @@ export class ResourceGuard implements CanActivate {
 
     const resource = this.reflector.get<string>(
       META_RESOURCE,
-      context.getClass(),
-    );
+      context.getHandler(),
+    ) ?? this.reflector.get<string>(META_RESOURCE, context.getClass());
     const explicitScopes =
       this.reflector.get<string[]>(META_SCOPES, context.getHandler()) ?? [];
     const conditionalScopes = this.reflector.get<ConditionalScopeFn>(
