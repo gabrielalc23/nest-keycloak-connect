@@ -62,10 +62,16 @@ export class ResourceGuard implements CanActivate {
       },
     };
 
-    const resource = this.reflector.get<string>(
+    const resourceHandler = this.reflector.get<string>(
       META_RESOURCE,
       context.getHandler(),
-    ) ?? this.reflector.get<string>(META_RESOURCE, context.getClass());
+    );
+    const resourceClass = this.reflector.get<string>(
+      META_RESOURCE,
+      context.getClass(),
+    );
+    // Prioritize handler level then class
+    const resource = resourceHandler ?? resourceClass;
     const explicitScopes =
       this.reflector.get<string[]>(META_SCOPES, context.getHandler()) ?? [];
     const conditionalScopes = this.reflector.get<ConditionalScopeFn>(
@@ -128,6 +134,11 @@ export class ResourceGuard implements CanActivate {
           `Controller has no @Resource defined, request denied due to policy enforcement`,
         );
       }
+      return shouldAllow;
+    }
+
+    if (!grant.access_token) {
+      this.logger.warn(`Access token is undefined`);
       return shouldAllow;
     }
 
