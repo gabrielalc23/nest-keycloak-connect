@@ -65,7 +65,7 @@ export class RoleGuard implements CanActivate {
     } else if (roleMerge == RoleMerge.OVERRIDE) {
       const resultRoles = this.reflector.getAllAndOverride<string[]>(
         META_ROLES,
-        [context.getClass(), context.getHandler()],
+        [context.getHandler(), context.getClass()],
       );
 
       if (resultRoles) {
