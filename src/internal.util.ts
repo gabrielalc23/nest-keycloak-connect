@@ -1,63 +1,89 @@
-import { ContextType, ExecutionContext } from '@nestjs/common';
-import KeycloakConnect from 'keycloak-connect';
-import { KeycloakConnectConfig } from './interface/keycloak-connect-options.interface';
-import { KeycloakMultiTenantService } from './services/keycloak-multitenant.service';
+import type { ContextType, ExecutionContext } from '@nestjs/common';
+import type { HttpArgumentsHost } from '@nestjs/common/interfaces';
+import type KeycloakConnect from 'keycloak-connect';
+import { createRequire } from 'node:module';
+import type {
+  GraphqlContext,
+  GraphqlModule,
+  KeycloakConnectConfig,
+  KeycloakRequest,
+  KeycloakRequestResponse,
+  KeycloakResponse,
+  KeycloakTokenPayload,
+} from './interfaces';
+import type { KeycloakMultiTenantService } from './services/keycloak-multitenant.service';
 import { parseToken } from './util';
 
-// Confusing and all, but I needed to extract this fn to avoid more repeating code
-// TODO: Rework in 2.0
-export const useKeycloak = async (
-  request: any,
+type GqlContextType = 'graphql' | ContextType;
+
+export const useKeycloak: (
+  request: KeycloakRequest,
+  jwt: string,
+  singleTenant: KeycloakConnect.Keycloak,
+  multiTenant: KeycloakMultiTenantService,
+  opts: KeycloakConnectConfig,
+) => Promise<KeycloakConnect.Keycloak> = async (
+  request: KeycloakRequest,
   jwt: string,
   singleTenant: KeycloakConnect.Keycloak,
   multiTenant: KeycloakMultiTenantService,
   opts: KeycloakConnectConfig,
 ): Promise<KeycloakConnect.Keycloak> => {
   if (opts.multiTenant && opts.multiTenant.realmResolver) {
-    const resolvedRealm = opts.multiTenant.realmResolver(request);
-    const realm =
-      resolvedRealm instanceof Promise ? await resolvedRealm : resolvedRealm;
+    const resolvedRealm: string | Promise<string> =
+      opts.multiTenant.realmResolver(request);
+    const realm: string = await Promise.resolve(resolvedRealm);
     return await multiTenant.get(realm, request);
-  } else if (!opts.realm) {
-    const payload = parseToken(jwt);
-    const issuerRealm = payload.iss.split('/').pop();
+  }
+
+  if (!opts.realm) {
+    const payload: KeycloakTokenPayload = parseToken(jwt);
+    const issuerRealm: string | undefined = payload.iss?.split('/').pop();
+
+    if (!issuerRealm) {
+      throw new Error('Cannot resolve Keycloak realm from token issuer.');
+    }
+
     return await multiTenant.get(issuerRealm, request);
   }
+
   return singleTenant;
 };
 
-export const attachCookieToHeader = (request: any, cookieKey: string) => {
-  // Attach cookie as authorization header
-  if (request && request.cookies && request.cookies[cookieKey]) {
-    request.headers.authorization = `Bearer ${request.cookies[cookieKey]}`;
+export const attachCookieToHeader: (
+  request: KeycloakRequest | undefined,
+  cookieKey: string,
+) => KeycloakRequest | undefined = (
+  request: KeycloakRequest | undefined,
+  cookieKey: string,
+): KeycloakRequest | undefined => {
+  const token: string | undefined = request?.cookies?.[cookieKey];
+
+  if (request && token) {
+    request.headers.authorization = `Bearer ${token}`;
   }
 
   return request;
 };
 
-type GqlContextType = 'graphql' | ContextType;
+export const extractRequest: (
+  context: ExecutionContext,
+) => KeycloakRequestResponse = (
+  context: ExecutionContext,
+): KeycloakRequestResponse => {
+  let request: KeycloakRequest | undefined;
+  let response: KeycloakResponse | undefined;
 
-export const extractRequest = (context: ExecutionContext): [any, any] => {
-  let request: any, response: any;
-
-  // Check if request is coming from graphql or http
   if (context.getType() === 'http') {
-    // http request
-    const httpContext = context.switchToHttp();
+    const httpContext: HttpArgumentsHost = context.switchToHttp();
 
-    request = httpContext.getRequest();
-    response = httpContext.getResponse();
+    request = httpContext.getRequest<KeycloakRequest>();
+    response = httpContext.getResponse<KeycloakResponse>();
   } else if (context.getType<GqlContextType>() === 'graphql') {
-    let gql: any;
-    // Check if graphql is installed
-    try {
-      gql = require('@nestjs/graphql');
-    } catch (er) {
-      throw new Error('@nestjs/graphql is not installed, cannot proceed');
-    }
-
-    // graphql request
-    const gqlContext = gql.GqlExecutionContext.create(context).getContext();
+    const nodeRequire: NodeRequire = createRequire(__filename);
+    const gql: GraphqlModule = nodeRequire('@nestjs/graphql') as GraphqlModule;
+    const gqlContext: GraphqlContext =
+      gql.GqlExecutionContext.create(context).getContext();
 
     request = gqlContext.req;
     response = gqlContext.res;
@@ -66,12 +92,19 @@ export const extractRequest = (context: ExecutionContext): [any, any] => {
   return [request, response];
 };
 
-export const extractRequestAndAttachCookie = (
+export const extractRequestAndAttachCookie: (
   context: ExecutionContext,
   cookieKey: string,
-) => {
-  const [tmpRequest, response] = extractRequest(context);
-  const request = attachCookieToHeader(tmpRequest, cookieKey);
+) => KeycloakRequestResponse = (
+  context: ExecutionContext,
+  cookieKey: string,
+): KeycloakRequestResponse => {
+  const [tmpRequest, response]: KeycloakRequestResponse =
+    extractRequest(context);
+  const request: KeycloakRequest | undefined = attachCookieToHeader(
+    tmpRequest,
+    cookieKey,
+  );
 
   return [request, response];
 };

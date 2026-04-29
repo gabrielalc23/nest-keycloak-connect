@@ -1,12 +1,14 @@
+import type { CustomDecorator} from '@nestjs/common';
 import { SetMetadata } from '@nestjs/common';
-import * as KeycloakConnect from 'keycloak-connect';
+import type * as KeycloakConnect from 'keycloak-connect';
+import type { KeycloakRequest } from '../interfaces';
 
-export const META_SCOPES = 'scopes';
+export const META_SCOPES: string = 'scopes';
 
-export const META_CONDITIONAL_SCOPES = 'conditional-scopes';
+export const META_CONDITIONAL_SCOPES: string = 'conditional-scopes';
 
 export type ConditionalScopeFn = (
-  request: any,
+  request: KeycloakRequest,
   token: KeycloakConnect.Token,
 ) => string[];
 
@@ -14,25 +16,31 @@ export type ConditionalScopeFn = (
  * Keycloak authorization scopes.
  * @param scopes - scopes that are associated with the resource
  */
-export const Scopes = (...scopes: string[]) => SetMetadata(META_SCOPES, scopes);
+export const Scopes: (...scopes: string[]) => CustomDecorator<string> = (
+  ...scopes: string[]
+) => SetMetadata(META_SCOPES, scopes);
 
 /**
  * Keycloak authorization conditional scopes.
  * @param scopes - scopes that are associated with the resource depending on the conditions
  */
-export const ConditionalScopes = (resolver: ConditionalScopeFn) =>
+export const ConditionalScopes: (
+  resolver: ConditionalScopeFn,
+) => CustomDecorator<string> = (resolver: ConditionalScopeFn) =>
   SetMetadata(META_CONDITIONAL_SCOPES, resolver);
 
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import type { ExecutionContext } from '@nestjs/common';
+import { createParamDecorator } from '@nestjs/common';
 import { extractRequest } from '../internal.util';
 
 /**
  * Retrieves the resolved scopes.
  * @since 1.5.0
  */
-export const ResolvedScopes = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext) => {
-    const [req] = extractRequest(ctx);
-    return req.scopes;
-  },
-);
+export const ResolvedScopes: (...dataOrPipes: unknown[]) => ParameterDecorator =
+  createParamDecorator(
+    (data: unknown, ctx: ExecutionContext): string[] | undefined => {
+      const [req]: ReturnType<typeof extractRequest> = extractRequest(ctx);
+      return req?.scopes;
+    },
+  );

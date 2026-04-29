@@ -1,14 +1,15 @@
 import { DynamicModule, Logger, Module, Provider } from '@nestjs/common';
+import type { Type } from '@nestjs/common';
 import {
   KEYCLOAK_CONNECT_OPTIONS,
   KEYCLOAK_MULTITENANT_SERVICE,
 } from './constants';
-import { KeycloakConnectModuleAsyncOptions } from './interface/keycloak-connect-module-async-options.interface';
-import { KeycloakConnectOptionsFactory } from './interface/keycloak-connect-options-factory.interface';
-import {
+import type {
+  KeycloakConnectModuleAsyncOptions,
+  KeycloakConnectOptionsFactory,
   KeycloakConnectOptions,
   NestKeycloakConfig,
-} from './interface/keycloak-connect-options.interface';
+} from './interfaces';
 import {
   createKeycloakConnectOptionProvider,
   keycloakProvider,
@@ -16,6 +17,7 @@ import {
 import { KeycloakMultiTenantService } from './services/keycloak-multitenant.service';
 
 export * from './constants';
+export * from './access-denied.util';
 export * from './decorators/access-token.decorator';
 export * from './decorators/enforcer-options.decorator';
 export * from './decorators/keycloak-user.decorator';
@@ -26,15 +28,14 @@ export * from './decorators/scopes.decorator';
 export * from './guards/auth.guard';
 export * from './guards/resource.guard';
 export * from './guards/role.guard';
-export * from './interface/keycloak-connect-module-async-options.interface';
-export * from './interface/keycloak-connect-options-factory.interface';
-export * from './interface/keycloak-connect-options.interface';
+export * from './enums';
+export * from './interfaces';
 export * from './services/keycloak-multitenant.service';
 export * from './util';
 
 @Module({})
 export class KeycloakConnectModule {
-  static logger = new Logger(KeycloakConnectModule.name);
+  static logger: Logger = new Logger(KeycloakConnectModule.name);
 
   /**
    * Register the `KeycloakConnect` module.
@@ -46,7 +47,7 @@ export class KeycloakConnectModule {
     opts: KeycloakConnectOptions,
     config?: NestKeycloakConfig,
   ): DynamicModule {
-    const keycloakConnectProviders = [
+    const keycloakConnectProviders: Provider[] = [
       createKeycloakConnectOptionProvider(opts, config),
       keycloakProvider,
       KeycloakMultiTenantService,
@@ -65,7 +66,7 @@ export class KeycloakConnectModule {
   public static registerAsync(
     opts: KeycloakConnectModuleAsyncOptions,
   ): DynamicModule {
-    const optsProvider = this.createAsyncProviders(opts);
+    const optsProvider: Provider[] = this.createAsyncProviders(opts);
 
     return {
       module: KeycloakConnectModule,
@@ -78,7 +79,7 @@ export class KeycloakConnectModule {
   private static createAsyncProviders(
     options: KeycloakConnectModuleAsyncOptions,
   ): Provider[] {
-    const reqProviders = [
+    const reqProviders: Provider[] = [
       this.createAsyncOptionsProvider(options),
       keycloakProvider,
       KeycloakMultiTenantService,
@@ -90,6 +91,12 @@ export class KeycloakConnectModule {
 
     if (options.useExisting || options.useFactory) {
       return reqProviders;
+    }
+
+    if (!options.useClass) {
+      throw new Error(
+        'KeycloakConnectModule.registerAsync requires useClass, useExisting, or useFactory.',
+      );
     }
 
     return [
@@ -112,11 +119,20 @@ export class KeycloakConnectModule {
       };
     }
 
+    const injectToken: Type<KeycloakConnectOptionsFactory> | undefined =
+      options.useExisting ?? options.useClass;
+
+    if (!injectToken) {
+      throw new Error(
+        'KeycloakConnectModule.registerAsync requires useClass or useExisting when useFactory is not provided.',
+      );
+    }
+
     return {
       provide: KEYCLOAK_CONNECT_OPTIONS,
       useFactory: async (optionsFactory: KeycloakConnectOptionsFactory) =>
         await optionsFactory.createKeycloakConnectOptions(),
-      inject: [options.useExisting || options.useClass],
+      inject: [injectToken],
     };
   }
 }

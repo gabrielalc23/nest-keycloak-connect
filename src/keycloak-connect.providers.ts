@@ -1,24 +1,29 @@
-import { Provider } from '@nestjs/common';
+import type { Provider } from '@nestjs/common';
 import * as fs from 'fs';
 import KeycloakConnect from 'keycloak-connect';
 import * as path from 'path';
+import { createAccessDeniedHandler } from './access-denied.util';
 import {
   KEYCLOAK_CONNECT_OPTIONS,
   KEYCLOAK_INSTANCE,
-  TokenValidation,
 } from './constants';
-import {
+import { TokenValidation } from './enums';
+import type {
   KeycloakConnectConfig,
   KeycloakConnectOptions,
   NestKeycloakConfig,
-} from './interface/keycloak-connect-options.interface';
+} from './interfaces';
 import { KeycloakConnectModule } from './keycloak-connect.module';
 
 export const keycloakProvider: Provider = {
   provide: KEYCLOAK_INSTANCE,
-  useFactory: (opts: KeycloakConnectOptions) => {
-    const keycloakOpts: any = opts;
-    const keycloak: any = new KeycloakConnect({}, keycloakOpts);
+  useFactory: (opts: KeycloakConnectOptions): KeycloakConnect.Keycloak => {
+    const keycloakOpts: KeycloakConnect.KeycloakConfig | string =
+      opts as unknown as KeycloakConnect.KeycloakConfig | string;
+    const keycloak: KeycloakConnect.Keycloak = new KeycloakConnect(
+      {},
+      keycloakOpts,
+    );
 
     // Warn if using token validation none
     if (
@@ -32,23 +37,25 @@ export const keycloakProvider: Provider = {
     }
 
     // Access denied is called, add a flag to request so our resource guard knows
-    keycloak.accessDenied = (req: any, res: any, next: any) => {
-      req.resourceDenied = true;
-      next();
-    };
+    Object.assign(keycloak, {
+      accessDenied: createAccessDeniedHandler(),
+    });
 
     return keycloak;
   },
   inject: [KEYCLOAK_CONNECT_OPTIONS],
 };
 
-const parseConfig = (
+const parseConfig: (
+  opts: KeycloakConnectOptions,
+  config?: NestKeycloakConfig,
+) => KeycloakConnectConfig = (
   opts: KeycloakConnectOptions,
   config?: NestKeycloakConfig,
 ): KeycloakConnectConfig => {
   if (typeof opts === 'string') {
-    const configPathRelative = path.join(__dirname, opts);
-    const configPathRoot = path.join(process.cwd(), opts);
+    const configPathRelative: string = path.join(__dirname, opts);
+    const configPathRoot: string = path.join(process.cwd(), opts);
 
     let configPath: string;
 
@@ -62,19 +69,36 @@ const parseConfig = (
       );
     }
 
-    const json = fs.readFileSync(configPath);
-    const keycloakConfig = JSON.parse(json.toString());
-    return Object.assign(keycloakConfig, config);
+    const json: Buffer = fs.readFileSync(configPath);
+    const keycloakConfig: unknown = JSON.parse(json.toString());
+
+    if (!isRecord(keycloakConfig)) {
+      throw new Error(`Invalid Keycloak config file: ${configPath}`);
+    }
+
+    return {
+      ...keycloakConfig,
+      ...config,
+    } as KeycloakConnectConfig;
   }
   return opts;
 };
 
-export const createKeycloakConnectOptionProvider = (
+export const createKeycloakConnectOptionProvider: (
   opts: KeycloakConnectOptions,
   config?: NestKeycloakConfig,
-) => {
+) => Provider = (
+  opts: KeycloakConnectOptions,
+  config?: NestKeycloakConfig,
+): Provider => {
   return {
     provide: KEYCLOAK_CONNECT_OPTIONS,
     useValue: parseConfig(opts, config),
   };
+};
+
+const isRecord: (value: unknown) => value is Record<string, unknown> = (
+  value: unknown,
+): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 };

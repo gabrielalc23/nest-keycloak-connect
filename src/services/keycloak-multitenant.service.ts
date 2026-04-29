@@ -1,7 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
 import KeycloakConnect from 'keycloak-connect';
+import { createAccessDeniedHandler } from '../access-denied.util';
+import type {
+  KeycloakConnectConfig,
+  KeycloakConnectOptions,
+  KeycloakRequest,
+} from '../interfaces';
 import { KEYCLOAK_CONNECT_OPTIONS } from '../constants';
-import { KeycloakConnectOptions } from '../interface/keycloak-connect-options.interface';
 
 /**
  * Stores all keycloak instances when multi tenant option is defined.
@@ -18,7 +23,7 @@ export class KeycloakMultiTenantService {
   /**
    * Clears the cached Keycloak instances.
    */
-  clear() {
+  clear(): void {
     this.instances.clear();
   }
 
@@ -30,7 +35,7 @@ export class KeycloakMultiTenantService {
    */
   async get(
     realm: string,
-    request: any = undefined,
+    request: KeycloakRequest | undefined = undefined,
   ): Promise<KeycloakConnect.Keycloak> {
     if (typeof this.keycloakOpts === 'string') {
       throw new Error(
@@ -46,43 +51,45 @@ export class KeycloakMultiTenantService {
       );
     }
 
-    const authServerUrl = await this.resolveAuthServerUrl(realm, request);
-    const secret = await this.resolveSecret(realm, request);
-    const clientId = await this.resolveClientId(realm, request);
+    const authServerUrl: string = await this.resolveAuthServerUrl(
+      realm,
+      request,
+    );
+    const secret: string = await this.resolveSecret(realm, request);
+    const clientId: string = await this.resolveClientId(realm, request);
 
-    // Check if existing
-    if (
-      this.instances.has(realm) &&
-      !this.keycloakOpts.multiTenant.resolveAlways
-    ) {
-      // Otherwise return the instance
-      return this.instances.get(realm);
-    } else {
-      // TODO: Repeating code from  provider, will need to rework this in 2.0
-      // Override realm, secret, and authServerUrl
-      const keycloakOpts: any = Object.assign(this.keycloakOpts, {
-        authServerUrl,
-        realm,
-        secret,
-        clientId,
-      });
-      const keycloak: any = new KeycloakConnect({}, keycloakOpts);
+    const existingKeycloak: KeycloakConnect.Keycloak | undefined =
+      this.instances.get(realm);
 
-      // The most important part
-      keycloak.accessDenied = (req: any, res: any, next: any) => {
-        req.resourceDenied = true;
-        next();
-      };
-
-      // Save instance
-      this.instances.set(realm, keycloak);
-      return keycloak;
+    if (existingKeycloak && !this.keycloakOpts.multiTenant.resolveAlways) {
+      return existingKeycloak;
     }
+
+    const keycloakOpts: KeycloakConnectConfig = {
+      ...this.keycloakOpts,
+      authServerUrl,
+      realm,
+      secret,
+      clientId,
+    };
+    const keycloakConfig: KeycloakConnect.KeycloakConfig =
+      keycloakOpts as unknown as KeycloakConnect.KeycloakConfig;
+    const keycloak: KeycloakConnect.Keycloak = new KeycloakConnect(
+      {},
+      keycloakConfig,
+    );
+
+    Object.assign(keycloak, {
+      accessDenied: createAccessDeniedHandler(),
+    });
+
+    this.instances.set(realm, keycloak);
+    return keycloak;
   }
 
   async resolveAuthServerUrl(
     realm: string,
-    request: any = undefined,
+    request: KeycloakRequest | undefined = undefined,
   ): Promise<string> {
     if (typeof this.keycloakOpts === 'string') {
       throw new Error(
@@ -100,36 +107,35 @@ export class KeycloakMultiTenantService {
 
     // If no realm auth server url resolver is defined, return defaults
     if (!this.keycloakOpts.multiTenant.realmAuthServerUrlResolver) {
-      return (
+      return this.requireConfigValue(
         this.keycloakOpts.authServerUrl ||
-        this.keycloakOpts['auth-server-url'] ||
-        this.keycloakOpts.serverUrl ||
-        this.keycloakOpts['server-url']
+          this.keycloakOpts['auth-server-url'] ||
+          this.keycloakOpts.serverUrl ||
+          this.keycloakOpts['server-url'],
+        'auth server url',
       );
     }
 
     // Resolve realm authServerUrl
-    const resolvedAuthServerUrl =
-      this.keycloakOpts.multiTenant.realmAuthServerUrlResolver(realm, request);
-    const authServerUrl =
-      resolvedAuthServerUrl || resolvedAuthServerUrl instanceof Promise
-        ? await resolvedAuthServerUrl
-        : resolvedAuthServerUrl;
+    const resolvedAuthServerUrl: string = await Promise.resolve(
+      this.keycloakOpts.multiTenant.realmAuthServerUrlResolver(realm, request),
+    );
 
     // Override auth server url
     // Order of priority: resolved realm auth server url > provided auth server url
-    return (
-      authServerUrl ||
-      this.keycloakOpts.authServerUrl ||
-      this.keycloakOpts['auth-server-url'] ||
-      this.keycloakOpts.serverUrl ||
-      this.keycloakOpts['server-url']
+    return this.requireConfigValue(
+      resolvedAuthServerUrl ||
+        this.keycloakOpts.authServerUrl ||
+        this.keycloakOpts['auth-server-url'] ||
+        this.keycloakOpts.serverUrl ||
+        this.keycloakOpts['server-url'],
+      'auth server url',
     );
   }
 
   async resolveClientId(
     realm: string,
-    request: any = undefined,
+    request: KeycloakRequest | undefined = undefined,
   ): Promise<string> {
     if (typeof this.keycloakOpts === 'string') {
       throw new Error(
@@ -147,29 +153,30 @@ export class KeycloakMultiTenantService {
 
     // If no realm client-id resolver is defined, return defaults
     if (!this.keycloakOpts.multiTenant.realmClientIdResolver) {
-      return this.keycloakOpts.clientId || this.keycloakOpts['client-id'];
+      return this.requireConfigValue(
+        this.keycloakOpts.clientId || this.keycloakOpts['client-id'],
+        'client id',
+      );
     }
 
     // Resolve realm client-id
-    const resolvedClientId =
-      this.keycloakOpts.multiTenant.realmClientIdResolver(realm, request);
-    const realmClientId =
-      resolvedClientId || resolvedClientId instanceof Promise
-        ? await resolvedClientId
-        : resolvedClientId;
+    const resolvedClientId: string = await Promise.resolve(
+      this.keycloakOpts.multiTenant.realmClientIdResolver(realm, request),
+    );
 
     // Override client-id
     // Order of priority: resolved realm secret > default global secret
-    return (
-      realmClientId ||
-      this.keycloakOpts.clientId ||
-      this.keycloakOpts['client-id']
+    return this.requireConfigValue(
+      resolvedClientId ||
+        this.keycloakOpts.clientId ||
+        this.keycloakOpts['client-id'],
+      'client id',
     );
   }
 
   async resolveSecret(
     realm: string,
-    request: any = undefined,
+    request: KeycloakRequest | undefined = undefined,
   ): Promise<string> {
     if (typeof this.keycloakOpts === 'string') {
       throw new Error(
@@ -191,15 +198,26 @@ export class KeycloakMultiTenantService {
     }
 
     // Resolve realm secret
-    const resolvedRealmSecret =
-      this.keycloakOpts.multiTenant.realmSecretResolver(realm, request);
-    const realmSecret =
-      resolvedRealmSecret || resolvedRealmSecret instanceof Promise
-        ? await resolvedRealmSecret
-        : resolvedRealmSecret;
+    const resolvedRealmSecret: string = await Promise.resolve(
+      this.keycloakOpts.multiTenant.realmSecretResolver(realm, request),
+    );
 
     // Override secret
     // Order of priority: resolved realm secret > default global secret
-    return realmSecret || this.keycloakOpts.secret;
+    return this.requireConfigValue(
+      resolvedRealmSecret || this.keycloakOpts.secret,
+      'client secret',
+    );
+  }
+
+  private requireConfigValue(
+    value: string | undefined,
+    configName: string,
+  ): string {
+    if (!value) {
+      throw new Error(`Missing Keycloak ${configName}.`);
+    }
+
+    return value;
   }
 }

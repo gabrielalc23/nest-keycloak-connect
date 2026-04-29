@@ -13,10 +13,14 @@ import {
   KEYCLOAK_COOKIE_DEFAULT,
   KEYCLOAK_INSTANCE,
   KEYCLOAK_MULTITENANT_SERVICE,
-  TokenValidation,
 } from '../constants';
 import { META_PUBLIC } from '../decorators/public.decorator';
-import { KeycloakConnectConfig } from '../interface/keycloak-connect-options.interface';
+import { TokenValidation } from '../enums';
+import type {
+  KeycloakConnectConfig,
+  KeycloakRequestResponse,
+  KeycloakRequestHeaders,
+} from '../interfaces';
 import { extractRequestAndAttachCookie, useKeycloak } from '../internal.util';
 import { KeycloakMultiTenantService } from '../services/keycloak-multitenant.service';
 import { parseToken } from '../util';
@@ -27,8 +31,8 @@ import { parseToken } from '../util';
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  private readonly logger = new Logger(AuthGuard.name);
-  private readonly reflector = new Reflector();
+  private readonly logger: Logger = new Logger(AuthGuard.name);
+  private readonly reflector: Reflector = new Reflector();
 
   constructor(
     @Inject(KEYCLOAK_INSTANCE)
@@ -40,44 +44,42 @@ export class AuthGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(META_PUBLIC, [
-      context.getClass(),
-      context.getHandler(),
-    ]);
+    const isPublic: boolean = this.reflector.getAllAndOverride<boolean>(
+      META_PUBLIC,
+      [context.getClass(), context.getHandler()],
+    );
 
     // Extract request/response
-    const cookieKey = this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
-    const [request] = extractRequestAndAttachCookie(context, cookieKey);
+    const cookieKey: string =
+      this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
+    const [request]: KeycloakRequestResponse =
+      extractRequestAndAttachCookie(context, cookieKey);
 
     // if is not an HTTP request ignore this guard
     if (!request) {
       return true;
     }
 
-    const jwt = this.extractJwt(request.headers);
-    const isJwtEmpty = jwt === null || jwt === undefined;
+    const jwt: string | null = this.extractJwt(request.headers);
 
-    // Not a public route, require jwt
-    if (!isPublic && isJwtEmpty) {
-      this.logger.verbose('Empty jwt, unauthorized');
-      throw new UnauthorizedException();
-    }
+    if (jwt === null) {
+      if (isPublic) {
+        return true;
+      }
 
-    // Public route, no jwt sent
-    if (isPublic && isJwtEmpty) {
-      return true;
+      throw new UnauthorizedException('Jwt token not exists');
     }
 
     this.logger.verbose(`Validating jwt`, { jwt });
 
-    const keycloak = await useKeycloak(
+    const keycloak: KeycloakConnect.Keycloak = await useKeycloak(
       request,
       jwt,
       this.singleTenant,
       this.multiTenant,
       this.keycloakOpts,
     );
-    const isValidToken = await this.validateToken(keycloak, jwt);
+    const isValidToken: boolean = await this.validateToken(keycloak, jwt);
 
     if (isValidToken) {
       // Attach user info object
@@ -100,29 +102,38 @@ export class AuthGuard implements CanActivate {
     throw new UnauthorizedException();
   }
 
-  private async validateToken(keycloak: KeycloakConnect.Keycloak, jwt: any) {
-    const tokenValidation =
+  private async validateToken(
+    keycloak: KeycloakConnect.Keycloak,
+    jwt: string,
+  ): Promise<boolean> {
+    const tokenValidation: TokenValidation =
       this.keycloakOpts.tokenValidation || TokenValidation.ONLINE;
 
-    const gm = keycloak.grantManager;
+    const gm: KeycloakConnect.GrantManager = keycloak.grantManager;
     let grant: KeycloakConnect.Grant;
 
     try {
-      grant = await gm.createGrant({ access_token: jwt });
-    } catch (ex) {
-      this.logger.warn(`Cannot validate access token: ${ex}`);
+      grant = await gm.createGrant({
+        access_token: jwt as unknown as KeycloakConnect.Token,
+      });
+    } catch (error: unknown) {
+      this.logger.warn(`Cannot validate access token: ${String(error)}`);
       // It will fail to create grants on invalid access token (i.e expired or wrong domain)
       return false;
     }
 
-    const token = grant.access_token;
+    const token: KeycloakConnect.Token | undefined = grant.access_token;
+
+    if (token === undefined) {
+      throw new UnauthorizedException('token not exists');
+    }
 
     this.logger.verbose(
       `Using token validation method: ${tokenValidation.toUpperCase()}`,
     );
 
     try {
-      let result: boolean | KeycloakConnect.Token;
+      let result: boolean | KeycloakConnect.Token | string;
 
       switch (tokenValidation) {
         case TokenValidation.ONLINE:
@@ -134,30 +145,40 @@ export class AuthGuard implements CanActivate {
         case TokenValidation.NONE:
           return true;
         default:
-          this.logger.warn(`Unknown validation method: ${tokenValidation}`);
+          this.logger.warn(
+            `Unknown validation method: ${String(tokenValidation)}`,
+          );
           return false;
       }
-    } catch (ex) {
-      this.logger.warn(`Cannot validate access token: ${ex}`);
+    } catch (error: unknown) {
+      this.logger.warn(`Cannot validate access token: ${String(error)}`);
     }
 
     return false;
   }
 
-  private extractJwt(headers: { [key: string]: string }) {
+  private extractJwt(headers: KeycloakRequestHeaders): string | null {
     if (headers && !headers.authorization) {
       this.logger.verbose(`No authorization header`);
       return null;
     }
 
-    const auth = headers.authorization.split(' ');
+    if (typeof headers.authorization !== 'string') {
+      this.logger.verbose(`Authorization header is not a string`);
+      return null;
+    }
+
+    const auth: string[] = headers.authorization.split(' ');
 
     // We only allow bearer
-    if (auth[0].toLowerCase() !== 'bearer') {
+    const scheme: string | undefined = auth[0];
+    const token: string | undefined = auth[1];
+
+    if (!scheme || scheme.toLowerCase() !== 'bearer') {
       this.logger.verbose(`No bearer header`);
       return null;
     }
 
-    return auth[1];
+    return token ?? null;
   }
 }

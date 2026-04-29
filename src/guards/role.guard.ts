@@ -12,14 +12,16 @@ import {
   KEYCLOAK_COOKIE_DEFAULT,
   KEYCLOAK_INSTANCE,
   KEYCLOAK_MULTITENANT_SERVICE,
-  RoleMatch,
-  RoleMerge,
 } from '../constants';
 import {
   META_ROLE_MATCHING_MODE,
   META_ROLES,
 } from '../decorators/roles.decorator';
-import { KeycloakConnectConfig } from '../interface/keycloak-connect-options.interface';
+import { RoleMatch, RoleMerge } from '../enums';
+import type {
+  KeycloakConnectConfig,
+  KeycloakRequestResponse,
+} from '../interfaces';
 import { extractRequestAndAttachCookie, useKeycloak } from '../internal.util';
 import { KeycloakMultiTenantService } from '../services/keycloak-multitenant.service';
 
@@ -29,8 +31,8 @@ import { KeycloakMultiTenantService } from '../services/keycloak-multitenant.ser
  */
 @Injectable()
 export class RoleGuard implements CanActivate {
-  private readonly logger = new Logger(RoleGuard.name);
-  private readonly reflector = new Reflector();
+  private readonly logger: Logger = new Logger(RoleGuard.name);
+  private readonly reflector: Reflector = new Reflector();
 
   constructor(
     @Inject(KEYCLOAK_INSTANCE)
@@ -42,28 +44,30 @@ export class RoleGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const roleMerge = this.keycloakOpts.roleMerge
+    const roleMerge: RoleMerge = this.keycloakOpts.roleMerge
       ? this.keycloakOpts.roleMerge
       : RoleMerge.OVERRIDE;
 
     const roles: string[] = [];
 
-    const matchingMode = this.reflector.getAllAndOverride<RoleMatch>(
+    const matchingMode: RoleMatch | undefined =
+      this.reflector.getAllAndOverride<RoleMatch>(
       META_ROLE_MATCHING_MODE,
       [context.getClass(), context.getHandler()],
     );
 
-    if (roleMerge == RoleMerge.ALL) {
-      const mergedRoles = this.reflector.getAllAndMerge<string[]>(META_ROLES, [
-        context.getClass(),
-        context.getHandler(),
-      ]);
+    if (roleMerge === RoleMerge.ALL) {
+      const mergedRoles: string[] = this.reflector.getAllAndMerge<string[]>(
+        META_ROLES,
+        [context.getClass(), context.getHandler()],
+      );
 
       if (mergedRoles) {
         roles.push(...mergedRoles);
       }
-    } else if (roleMerge == RoleMerge.OVERRIDE) {
-      const resultRoles = this.reflector.getAllAndOverride<string[]>(
+    } else if (roleMerge === RoleMerge.OVERRIDE) {
+      const resultRoles: string[] | undefined =
+        this.reflector.getAllAndOverride<string[]>(
         META_ROLES,
         [context.getHandler(), context.getClass()],
       );
@@ -72,26 +76,29 @@ export class RoleGuard implements CanActivate {
         roles.push(...resultRoles);
       }
     } else {
-      throw Error(`Unknown role merge: ${roleMerge}`);
+      throw Error(`Unknown role merge: ${String(roleMerge)}`);
     }
 
     if (roles.length === 0) {
       return true;
     }
 
-    const roleMatchingMode = matchingMode ?? RoleMatch.ANY;
+    const roleMatchingMode: RoleMatch = matchingMode ?? RoleMatch.ANY;
 
     this.logger.verbose(`Using matching mode: ${roleMatchingMode}`, { roles });
 
     // Extract request
-    const cookieKey = this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
-    const [request] = extractRequestAndAttachCookie(context, cookieKey);
-    const { accessToken } = request;
+    const cookieKey: string =
+      this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
+    const [request]: KeycloakRequestResponse =
+      extractRequestAndAttachCookie(context, cookieKey);
 
     // if is not an HTTP request ignore this guard
     if (!request) {
       return true;
     }
+
+    const { accessToken }: { accessToken?: string } = request;
 
     if (!accessToken) {
       // No access token attached, auth guard should have attached the necessary token
@@ -102,25 +109,33 @@ export class RoleGuard implements CanActivate {
     }
 
     // Create grant
-    const keycloak = await useKeycloak(
+    const keycloak: KeycloakConnect.Keycloak = await useKeycloak(
       request,
-      request.accessToken,
+      accessToken,
       this.singleTenant,
       this.multiTenant,
       this.keycloakOpts,
     );
-    const grant = await keycloak.grantManager.createGrant({
-      access_token: accessToken,
+    const grant: KeycloakConnect.Grant = await keycloak.grantManager.createGrant({
+      access_token: accessToken as unknown as KeycloakConnect.Token,
     });
 
     // Grab access token from grant
-    const grantAccessToken: KeycloakConnect.Token = grant.access_token as any;
+    const grantAccessToken: KeycloakConnect.Token | undefined =
+      grant.access_token;
+
+    if (!grantAccessToken) {
+      this.logger.warn('Grant access token is undefined');
+      return false;
+    }
 
     // For verbose logging, we store it instead of returning it immediately
-    const granted =
+    const granted: boolean =
       roleMatchingMode === RoleMatch.ANY
-        ? roles.some((r) => grantAccessToken.hasRole(r))
-        : roles.every((r) => grantAccessToken.hasRole(r));
+        ? roles.some((role: string): boolean => grantAccessToken.hasRole(role))
+        : roles.every((role: string): boolean =>
+            grantAccessToken.hasRole(role),
+          );
 
     if (granted) {
       this.logger.verbose(`Resource granted due to role(s)`);

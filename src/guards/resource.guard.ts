@@ -12,17 +12,23 @@ import {
   KEYCLOAK_COOKIE_DEFAULT,
   KEYCLOAK_INSTANCE,
   KEYCLOAK_MULTITENANT_SERVICE,
-  PolicyEnforcementMode,
 } from '../constants';
 import { META_ENFORCER_OPTIONS } from '../decorators/enforcer-options.decorator';
 import { META_PUBLIC } from '../decorators/public.decorator';
 import { META_RESOURCE } from '../decorators/resource.decorator';
 import {
-  ConditionalScopeFn,
   META_CONDITIONAL_SCOPES,
   META_SCOPES,
 } from '../decorators/scopes.decorator';
-import { KeycloakConnectConfig } from '../interface/keycloak-connect-options.interface';
+import { PolicyEnforcementMode } from '../enums';
+import type { ConditionalScopeFn } from '../decorators/scopes.decorator';
+import type {
+  KeycloakConnectConfig,
+  KeycloakRequest,
+  KeycloakRequestHeaderValue,
+  KeycloakRequestResponse,
+  KeycloakResponse,
+} from '../interfaces';
 import { extractRequestAndAttachCookie, useKeycloak } from '../internal.util';
 import { KeycloakMultiTenantService } from '../services/keycloak-multitenant.service';
 
@@ -33,8 +39,8 @@ import { KeycloakMultiTenantService } from '../services/keycloak-multitenant.ser
  */
 @Injectable()
 export class ResourceGuard implements CanActivate {
-  private readonly logger = new Logger(ResourceGuard.name);
-  private readonly reflector = new Reflector();
+  private readonly logger: Logger = new Logger(ResourceGuard.name);
+  private readonly reflector: Reflector = new Reflector();
 
   constructor(
     @Inject(KEYCLOAK_INSTANCE)
@@ -47,59 +53,65 @@ export class ResourceGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const defaultEnforcerOpts: KeycloakConnect.EnforcerOptions = {
-      claims: (request: any) => {
-        const httpUri = request.url;
-        const userAgent = request.headers['user-agent'];
+      claims: (request: KeycloakRequest): Record<string, string[]> => {
+        const httpUri: string = request.url ?? '';
+        const userAgent: KeycloakRequestHeaderValue =
+          request.headers['user-agent'];
+        const userAgentValue: string = Array.isArray(userAgent)
+          ? userAgent.join(', ')
+          : (userAgent ?? '');
 
         this.logger.verbose(
-          `Enforcing claims, http.uri: ${httpUri}, user.agent: ${userAgent}`,
+          `Enforcing claims, http.uri: ${httpUri}, user.agent: ${userAgentValue}`,
         );
 
         return {
           'http.uri': [httpUri],
-          'user.agent': [userAgent],
+          'user.agent': [userAgentValue],
         };
       },
     };
 
-    const resourceHandler = this.reflector.get<string>(
+    const resourceHandler: string = this.reflector.get<string>(
       META_RESOURCE,
       context.getHandler(),
     );
-    const resourceClass = this.reflector.get<string>(
+    const resourceClass: string = this.reflector.get<string>(
       META_RESOURCE,
       context.getClass(),
     );
     // Prioritize handler level then class
-    const resource = resourceHandler ?? resourceClass;
-    const explicitScopes =
+    const resource: string = resourceHandler ?? resourceClass;
+    const explicitScopes: string[] =
       this.reflector.get<string[]>(META_SCOPES, context.getHandler()) ?? [];
-    const conditionalScopes = this.reflector.get<ConditionalScopeFn>(
-      META_CONDITIONAL_SCOPES,
-      context.getHandler(),
+    const conditionalScopes: ConditionalScopeFn | undefined =
+      this.reflector.get<ConditionalScopeFn>(
+        META_CONDITIONAL_SCOPES,
+        context.getHandler(),
+      );
+    const isPublic: boolean = this.reflector.getAllAndOverride<boolean>(
+      META_PUBLIC,
+      [context.getClass(), context.getHandler()],
     );
-    const isPublic = this.reflector.getAllAndOverride<boolean>(META_PUBLIC, [
-      context.getClass(),
-      context.getHandler(),
-    ]);
-    const enforcerOpts =
+    const enforcerOpts: KeycloakConnect.EnforcerOptions =
       this.reflector.getAllAndOverride<KeycloakConnect.EnforcerOptions>(
         META_ENFORCER_OPTIONS,
         [context.getClass(), context.getHandler()],
       ) ?? defaultEnforcerOpts;
 
     // Default to permissive
-    const policyEnforcementMode =
+    const policyEnforcementMode: PolicyEnforcementMode =
       this.keycloakOpts.policyEnforcement || PolicyEnforcementMode.PERMISSIVE;
-    const shouldAllow =
+
+    const shouldAllow: boolean =
       policyEnforcementMode === PolicyEnforcementMode.PERMISSIVE;
 
     // Extract request/response
-    const cookieKey = this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
-    const [request, response] = extractRequestAndAttachCookie(
-      context,
-      cookieKey,
-    );
+    const cookieKey: string =
+      this.keycloakOpts.cookieKey || KEYCLOAK_COOKIE_DEFAULT;
+
+    const [request, response]: KeycloakRequestResponse =
+      extractRequestAndAttachCookie(context, cookieKey);
 
     // if is not an HTTP request ignore this guard
     if (!request) {
@@ -111,16 +123,26 @@ export class ResourceGuard implements CanActivate {
       return true;
     }
 
-    const keycloak = await useKeycloak(
+    const { accessToken }: { accessToken?: string } = request;
+
+    if (!accessToken) {
+      this.logger.warn(
+        'No access token found in request, are you sure AuthGuard is first in the chain?',
+      );
+      return shouldAllow;
+    }
+
+    const keycloak: KeycloakConnect.Keycloak = await useKeycloak(
       request,
-      request.accessToken,
+      accessToken,
       this.singleTenant,
       this.multiTenant,
       this.keycloakOpts,
     );
 
-    const grant = await keycloak.grantManager.createGrant({
-      access_token: request.accessToken,
+    const grant: KeycloakConnect.Grant =
+      await keycloak.grantManager.createGrant({
+      access_token: accessToken as unknown as KeycloakConnect.Token,
     });
 
     // No resource given, check policy enforcement mode
@@ -143,12 +165,12 @@ export class ResourceGuard implements CanActivate {
     }
 
     // Build the required scopes
-    const conditionalScopesResult =
-      conditionalScopes != null || conditionalScopes != undefined
+    const conditionalScopesResult: string[] =
+      conditionalScopes !== null && conditionalScopes !== undefined
         ? conditionalScopes(request, grant.access_token)
         : [];
 
-    const scopes = [...explicitScopes, ...conditionalScopesResult];
+    const scopes: string[] = [...explicitScopes, ...conditionalScopesResult];
 
     // Attach resolved scopes
     request.scopes = scopes;
@@ -168,16 +190,22 @@ export class ResourceGuard implements CanActivate {
     }
 
     this.logger.verbose(
-      `Protecting resource [ ${resource} ] with scopes: [ ${scopes} ]`,
+      `Protecting resource [ ${resource} ] with scopes: [ ${scopes.join(', ')} ]`,
     );
 
-    const user = request.user?.preferred_username ?? 'user';
+    const user: string = request.user?.preferred_username ?? 'user';
 
-    const enforcerFn = createEnforcerContext(request, response, enforcerOpts);
+    const enforcerFn: EnforcerContext = createEnforcerContext(
+      request,
+      response,
+      enforcerOpts,
+    );
 
     // Build permissions
-    const permissions = scopes.map((scope) => `${resource}:${scope}`);
-    const isAllowed = await enforcerFn(keycloak, permissions);
+    const permissions: string[] = scopes.map(
+      (scope: string): string => `${resource}:${scope}`,
+    );
+    const isAllowed: boolean = await enforcerFn(keycloak, permissions);
 
     // If statement for verbose logging only
     if (!isAllowed) {
@@ -190,17 +218,42 @@ export class ResourceGuard implements CanActivate {
   }
 }
 
-const createEnforcerContext =
-  (request: any, response: any, options?: KeycloakConnect.EnforcerOptions) =>
-  (keycloak: KeycloakConnect.Keycloak, permissions: string[]) =>
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    new Promise<boolean>((resolve, _) =>
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      keycloak.enforcer(permissions, options)(request, response, (_: any) => {
+type EnforcerMiddleware = (
+  request: KeycloakRequest,
+  response: KeycloakResponse | undefined,
+  next: (error?: unknown) => void,
+) => void;
+
+type EnforcerContext = (
+  keycloak: KeycloakConnect.Keycloak,
+  permissions: string[],
+) => Promise<boolean>;
+
+const createEnforcerContext: (
+  request: KeycloakRequest,
+  response: KeycloakResponse | undefined,
+  options?: KeycloakConnect.EnforcerOptions,
+) => EnforcerContext =
+  (
+    request: KeycloakRequest,
+    response: KeycloakResponse | undefined,
+    options?: KeycloakConnect.EnforcerOptions,
+  ): EnforcerContext =>
+  (
+    keycloak: KeycloakConnect.Keycloak,
+    permissions: string[],
+  ): Promise<boolean> =>
+    new Promise<boolean>((resolve: (value: boolean) => void): void => {
+      const enforcer: EnforcerMiddleware = keycloak.enforcer(
+        permissions,
+        options,
+      ) as unknown as EnforcerMiddleware;
+
+      enforcer(request, response, (_error?: unknown): void => {
         if (request.resourceDenied) {
           resolve(false);
         } else {
           resolve(true);
         }
-      }),
-    );
+      });
+    });

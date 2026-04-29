@@ -1,18 +1,46 @@
-import EslintPluginPrettierRecommended from 'eslint-plugin-prettier/recommended';
 import TSESLint from 'typescript-eslint';
 
 const CustomRules = {
   rules: {
-    '@typescript-eslint/restrict-template-expressions': 'off',
-    '@typescript-eslint/no-unsafe-return': 'off',
-    '@typescript-eslint/no-unsafe-argument': 'off',
-    '@typescript-eslint/no-unsafe-call': 'off',
-    '@typescript-eslint/no-unsafe-assignment': 'off',
-    '@typescript-eslint/no-unsafe-member-access': 'off',
-    '@typescript-eslint/interface-name-prefix': 'off',
-    '@typescript-eslint/explicit-function-return-type': 'off',
-    '@typescript-eslint/explicit-module-boundary-types': 'off',
-    '@typescript-eslint/no-explicit-any': 'off',
+    '@typescript-eslint/consistent-type-imports': [
+      'error',
+      {
+        prefer: 'type-imports',
+        fixStyle: 'separate-type-imports',
+      },
+    ],
+    '@typescript-eslint/explicit-function-return-type': [
+      'error',
+      {
+        allowExpressions: false,
+        allowTypedFunctionExpressions: true,
+      },
+    ],
+    '@typescript-eslint/explicit-module-boundary-types': 'error',
+    '@typescript-eslint/no-explicit-any': 'error',
+    '@typescript-eslint/no-inferrable-types': 'off',
+    '@typescript-eslint/no-unused-vars': [
+      'error',
+      {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+      },
+    ],
+    '@typescript-eslint/typedef': [
+      'error',
+      {
+        arrayDestructuring: true,
+        arrowParameter: true,
+        memberVariableDeclaration: true,
+        objectDestructuring: true,
+        parameter: true,
+        propertyDeclaration: true,
+        variableDeclaration: true,
+        variableDeclarationIgnoreFunction: false,
+      },
+    ],
+    eqeqeq: ['error', 'always'],
   },
 };
 
@@ -36,7 +64,6 @@ export default [
   PerformanceParser,
   CustomRules,
   NoTypeCheckOnJavascript,
-  EslintPluginPrettierRecommended,
   {
     ignores: ['eslint.config.mjs'],
   },
