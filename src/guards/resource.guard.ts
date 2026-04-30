@@ -244,6 +244,8 @@ const createEnforcerContext: (
     permissions: string[],
   ): Promise<boolean> =>
     new Promise<boolean>((resolve: (value: boolean) => void): void => {
+      delete request.resourceDenied;
+
       const enforcer: EnforcerMiddleware = keycloak.enforcer(
         permissions,
         options,

@@ -1,5 +1,5 @@
 {
-  "name": "nest-keycloak-connect",
+  "name": "@twoangels/nest-keycloak-connect",
   "version": "2.0.0-alpha.3",
   "description": "keycloak-nodejs-connect module for Nest",
   "author": "John Joshua Ferrer <johnjoshuaferrer@disroot.org>",
@@ -45,20 +45,17 @@
   "peerDependencies": {
     "@nestjs/common": ">=6.0.0 <12.0.0",
     "@nestjs/core": ">=6.0.0 <12.0.0",
-    "@nestjs/graphql": ">=6",
     "keycloak-connect": ">=10.0.0"
   },
   "devDependencies": {
     "@nestjs/common": "^11.1.19",
     "@nestjs/core": "^11.1.19",
-    "@nestjs/graphql": "^13.3.0",
     "@types/express": "^4.17.25",
     "@types/node": "^18.19.130",
     "class-transformer": "0.5.1",
     "class-validator": "0.14.1",
     "cpr": "3.0.1",
     "eslint": "8.57.0",
-    "graphql": "^16.13.2",
     "husky": "^9.1.7",
     "keycloak-connect": "24.0.1",
     "lint-staged": "^15.5.2",
@@ -69,11 +66,6 @@
     "ts-node": "10.8.2",
     "typescript": "5.4.2",
     "typescript-eslint": "^7.18.0"
-  },
-  "peerDependenciesMeta": {
-    "@nestjs/graphql": {
-      "optional": true
-    }
   },
   "funding": [
     {

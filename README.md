@@ -26,6 +26,7 @@ An adapter for [keycloak-nodejs-connect](https://github.com/keycloak/keycloak-no
 - Protect your resources using [Keycloak's Authorization Services](https://www.keycloak.org/docs/latest/authorization_services/).
 - Simply add `@Resource`, `@Scopes`, or `@Roles` in your controllers and you're good to go.
 - Compatible with [Fastify](https://github.com/fastify/fastify) platform.
+- Compatible with NestJS WebSocket gateways.
 
 ## Installation
 
@@ -134,6 +135,22 @@ providers: [
 @Controller('cats')
 @UseGuards(AuthGuard, ResourceGuard)
 export class CatsController {}
+```
+
+#### WebSocket gateways
+
+The guards can also be used in NestJS WebSocket gateways. For Socket.IO clients, the token can be sent through the handshake `Authorization` header, configured cookie, `auth.authorization`, `auth.token`, `query.authorization`, `query.token`, `query.accessToken`, or `query.access_token`. URL query strings with `authorization`, `token`, `accessToken`, or `access_token` are also supported. For non-Socket.IO adapters, the client should expose the handshake request as `upgradeReq`, `request`, or `req`.
+
+```typescript
+@WebSocketGateway()
+@UseGuards(AuthGuard, RoleGuard)
+export class EventsGateway {
+  @SubscribeMessage('events')
+  @Roles('admin')
+  findEvents() {
+    return [];
+  }
+}
 ```
 
 ## What does these providers do ?

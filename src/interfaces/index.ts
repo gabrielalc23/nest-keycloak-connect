@@ -1,6 +1,3 @@
-export * from './graphql-context.interface';
-export * from './graphql-execution-context-adapter.interface';
-export * from './graphql-module.interface';
 export * from './keycloak-access-denied-handler.type';
 export * from './keycloak-connect-config.interface';
 export * from './keycloak-connect-module-async-options.interface';
